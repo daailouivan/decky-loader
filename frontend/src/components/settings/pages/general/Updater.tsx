@@ -27,29 +27,33 @@ function PatchNotesModal({ versionInfo, closeModal }: { versionInfo: VerInfo | n
     <Focusable onCancelButton={closeModal}>
       <FocusRing>
         <Carousel
-          fnItemRenderer={(id: number) => (
-            <Focusable
-              style={{
-                marginTop: '40px',
-                height: 'calc( 100% - 40px )',
-                overflowY: 'scroll',
-                display: 'flex',
-                justifyContent: 'center',
-                margin: '40px',
-              }}
-            >
-              <div>
-                <h1>{versionInfo?.all?.[id]?.name}</h1>
-                {versionInfo?.all?.[id]?.body ? (
-                  <WithSuspense>
-                    <MarkdownRenderer onDismiss={closeModal}>{versionInfo.all[id].body}</MarkdownRenderer>
-                  </WithSuspense>
-                ) : (
-                  'no patch notes for this version'
-                )}
-              </div>
-            </Focusable>
-          )}
+          fnItemRenderer={(id: number) => {
+            console.log('RENDERER ID', id);
+            console.log('RENDERER CONTENT', versionInfo?.all?.[id]);
+            return (
+              <Focusable
+                style={{
+                  marginTop: '40px',
+                  height: 'calc( 100% - 40px )',
+                  overflowY: 'scroll',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  margin: '40px',
+                }}
+              >
+                <div>
+                  <h1>{versionInfo?.all?.[id]?.name}</h1>
+                  {versionInfo?.all?.[id]?.body ? (
+                    <WithSuspense>
+                      <MarkdownRenderer onDismiss={closeModal}>{versionInfo.all[id].body}</MarkdownRenderer>
+                    </WithSuspense>
+                  ) : (
+                    'no patch notes for this version'
+                  )}
+                </div>
+              </Focusable>
+            );
+          }}
           fnGetId={(id) => id}
           nNumItems={versionInfo?.all?.length}
           nHeight={SP.innerHeight - 40}
@@ -89,6 +93,8 @@ export default function UpdaterSettings() {
   const showPatchNotes = useCallback(() => {
     showModal(<PatchNotesModal versionInfo={versionInfo} />);
   }, [versionInfo]);
+
+  console.log('vinfo', versionInfo);
 
   return (
     <>
