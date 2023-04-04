@@ -30,11 +30,10 @@ class PluginInstallContext:
         self.hash = hash
 
 class PluginBrowser:
-    def __init__(self, plugin_path, plugins, loader, settings) -> None:
+    def __init__(self, plugin_path, plugins, loader) -> None:
         self.plugin_path = plugin_path
         self.plugins = plugins
         self.loader = loader
-        self.settings = settings
         self.install_requests = {}
 
     def _unzip_to_plugin_dir(self, zip, name, hash):
@@ -124,10 +123,6 @@ class PluginBrowser:
                 logger.debug("Plugin %s was stopped", name)
                 del self.plugins[name]
                 logger.debug("Plugin %s was removed from the dictionary", name)
-                current_plugin_order = self.settings.getSetting("pluginOrder")
-                current_plugin_order.remove(name)
-                self.settings.setSetting("pluginOrder", current_plugin_order)
-                logger.debug("Plugin %s was removed from the pluginOrder setting", name)
             logger.debug("removing files %s" % str(name))
             rmtree(plugin_dir)
         except FileNotFoundError:
@@ -139,6 +134,10 @@ class PluginBrowser:
             self.loader.watcher.disabled = False
 
     async def _install(self, artifact, name, version, hash):
+        # Will be set later in code
+        res_zip = None
+
+        # Check if plugin is installed
         isInstalled = False
         if self.loader.watcher:
             self.loader.watcher.disabled = True
@@ -148,47 +147,57 @@ class PluginBrowser:
                 isInstalled = True
         except:
             logger.error(f"Failed to determine if {name} is already installed, continuing anyway.")
-        logger.info(f"Installing {name} (Version: {version})")
-        async with ClientSession() as client:
-            logger.debug(f"Fetching {artifact}")
-            res = await client.get(artifact, ssl=get_ssl_context())
-            if res.status == 200:
-                logger.debug("Got 200. Reading...")
-                data = await res.read()
-                logger.debug(f"Read {len(data)} bytes")
-                res_zip = BytesIO(data)
-                if isInstalled:
-                    try:
-                        logger.debug("Uninstalling existing plugin...")
-                        await self.uninstall_plugin(name)
-                    except:
-                        logger.error(f"Plugin {name} could not be uninstalled.")
-                logger.debug("Unzipping...")
-                ret = self._unzip_to_plugin_dir(res_zip, name, hash)
-                if ret:
-                    plugin_folder = self.find_plugin_folder(name)
-                    plugin_dir = path.join(self.plugin_path, plugin_folder)
-                    ret = await self._download_remote_binaries_for_plugin_with_name(plugin_dir)
-                    if ret:
-                        logger.info(f"Installed {name} (Version: {version})")
-                        if name in self.loader.plugins:
-                            self.loader.plugins[name].stop()
-                            self.loader.plugins.pop(name, None)
-                        await sleep(1)
-                        
-                        current_plugin_order = self.settings.getSetting("pluginOrder")
-                        current_plugin_order.append(name)
-                        self.settings.setSetting("pluginOrder", current_plugin_order)
-                        logger.debug("Plugin %s was added to the pluginOrder setting", name)
-                        self.loader.import_plugin(path.join(plugin_dir, "main.py"), plugin_folder)
-                    else:
-                        logger.fatal(f"Failed Downloading Remote Binaries")
+
+        # Check if the file is a local file or a URL
+        if artifact.startswith("file://"):
+            logger.info(f"Installing {name} from local ZIP file (Version: {version})")
+            res_zip = BytesIO(open(artifact[7:], "rb").read())
+        else:
+            logger.info(f"Installing {name} from URL (Version: {version})")
+            async with ClientSession() as client:
+                logger.debug(f"Fetching {artifact}")
+                res = await client.get(artifact, ssl=get_ssl_context())
+                if res.status == 200:
+                    logger.debug("Got 200. Reading...")
+                    data = await res.read()
+                    logger.debug(f"Read {len(data)} bytes")
+                    res_zip = BytesIO(data)
                 else:
-                    self.log.fatal(f"SHA-256 Mismatch!!!! {name} (Version: {version})")
-                if self.loader.watcher:
-                    self.loader.watcher.disabled = False
+                    logger.fatal(f"Could not fetch from URL. {await res.text()}")
+
+        # Check to make sure we got the file
+        if res_zip is None:
+            logger.fatal(f"Could not fetch {artifact}")
+            return
+        
+        # If plugin is installed, uninstall it
+        if isInstalled:
+            try:
+                logger.debug("Uninstalling existing plugin...")
+                await self.uninstall_plugin(name)
+            except:
+                logger.error(f"Plugin {name} could not be uninstalled.")
+
+        # Install the plugin
+        logger.debug("Unzipping...")
+        ret = self._unzip_to_plugin_dir(res_zip, name, hash)
+        if ret:
+            plugin_folder = self.find_plugin_folder(name)
+            plugin_dir = path.join(self.plugin_path, plugin_folder)
+            ret = await self._download_remote_binaries_for_plugin_with_name(plugin_dir)
+            if ret:
+                logger.info(f"Installed {name} (Version: {version})")
+                if name in self.loader.plugins:
+                    self.loader.plugins[name].stop()
+                    self.loader.plugins.pop(name, None)
+                await sleep(1)
+                self.loader.import_plugin(path.join(plugin_dir, "main.py"), plugin_folder)
             else:
-                logger.fatal(f"Could not fetch from URL. {await res.text()}")
+                logger.fatal(f"Failed Downloading Remote Binaries")
+        else:
+            self.log.fatal(f"SHA-256 Mismatch!!!! {name} (Version: {version})")
+        if self.loader.watcher:
+            self.loader.watcher.disabled = False
 
     async def request_plugin_install(self, artifact, name, version, hash):
         request_id = str(time())
